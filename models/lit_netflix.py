@@ -9,56 +9,55 @@ from torchvision.datasets.mnist import MNIST
 from torchvision import transforms
 
 
-class Backbone(torch.nn.Module):
-    def __init__(self, hidden_dim=128):
-        super().__init__()
-        self.l1 = torch.nn.Linear(28 * 28, hidden_dim)
-        self.l2 = torch.nn.Linear(hidden_dim, 10)
-
-    def forward(self, x):
-        x = x.view(x.size(0), -1)
-        x = torch.relu(self.l1(x))
-        x = torch.relu(self.l2(x))
-        return x
-
-
-class LitClassifier(pl.LightningModule):
-    def __init__(self, backbone, learning_rate=1e-3):
+class Netflix_Recommender_Engine(pl.LightningModule):
+    def __init__(self): # , hidden_dim=128, learning_rate=1e-3):
         super().__init__()
         self.save_hyperparameters()
-        self.backbone = backbone
+
+        self.movie_embedding = torch.nn.Embeddng(17770,self.hparams.embedding_dim)
+        self.user_embedding = torch.nn.Embeddng(480189,self.hparams.embedding_dim)
+        self.movie_l1 = torch.nn.Linear(self.hparams.embedding_dim, self.hparams.hidden_dim)
+        self.user_l1 = torch.nn.Linear(self.hparams.embedding_dim, self.hparams.hidden_dim)
+        self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 5)
 
     def forward(self, x):
-        # use forward for inference/predictions
-        embedding = self.backbone(x)
-        return embedding
+        movie_id,user_id = x
+        movie_vec = self.movie_embedding(movie_id)
+        user_vec = self.user_embedding(user_id)
+
+        movie_l1 = torch.relu(self.movie_l1(movie_vec))
+        user_l1 = torch.relu(self.user_l1(user_vec))
+
+        combined = torch.cat([movie_l1,user_l1])
+        rating = self.l2(combined)
+        return rating
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self.backbone(x)
-        loss = F.cross_entropy(y_hat, y)
-        self.log('train_loss', loss, on_epoch=True)
+        y_hat = self(x)
+        loss = F.mse_loss(y_hat, y)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self.backbone(x)
-        loss = F.cross_entropy(y_hat, y)
-        self.log('valid_loss', loss, on_step=True)
+        y_hat = self(x)
+        loss = F.mse_loss(y_hat, y)
+        self.log('valid_loss', loss)
 
     def test_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self.backbone(x)
-        loss = F.cross_entropy(y_hat, y)
+        y_hat = self(x)
+        loss = F.mse_loss(y_hat, y)
         self.log('test_loss', loss)
 
     def configure_optimizers(self):
-        # self.hparams available because we called self.save_hyperparameters()
         return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
 
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
+        parser.add_argument('--embedding_dim', type=int, default=128)
+        parser.add_argument('--hidden_dim', type=int, default=256)
         parser.add_argument('--learning_rate', type=float, default=0.0001)
         return parser
 
@@ -71,9 +70,8 @@ def cli_main():
     # ------------
     parser = ArgumentParser()
     parser.add_argument('--batch_size', default=32, type=int)
-    parser.add_argument('--hidden_dim', type=int, default=128)
     parser = pl.Trainer.add_argparse_args(parser)
-    parser = LitClassifier.add_model_specific_args(parser)
+    parser = Netflix_Recommender_Engine.add_model_specific_args(parser)
     args = parser.parse_args()
 
     # ------------
@@ -90,7 +88,7 @@ def cli_main():
     # ------------
     # model
     # ------------
-    model = LitClassifier(Backbone(hidden_dim=args.hidden_dim), args.learning_rate)
+    model = Netflix_Recommender_Engine()#(args.hidden_dim, args.learning_rate)
 
     # ------------
     # training
@@ -101,8 +99,7 @@ def cli_main():
     # ------------
     # testing
     # ------------
-    result = trainer.test(test_dataloaders=test_loader)
-    print(result)
+    trainer.test(test_dataloaders=test_loader)
 
 
 if __name__ == '__main__':
