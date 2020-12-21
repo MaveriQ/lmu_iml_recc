@@ -7,7 +7,6 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from pathlib import Path
 
-
 # In bash run ```$ cat *.txt>>combined.txt``` to concatenate all movie rating files into one
 
 
