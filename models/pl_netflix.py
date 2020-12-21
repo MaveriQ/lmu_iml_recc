@@ -3,22 +3,27 @@ from argparse import ArgumentParser
 import torch
 import pytorch_lightning as pl
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, random_split
+from pathlib import Path
+import pdb
 
-from torchvision.datasets.mnist import MNIST
-from torchvision import transforms
+import os,sys,inspect
+currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+parentdir = os.path.dirname(currentdir)
+sys.path.insert(0,parentdir)
 
+from src.pl_dm_netflix import Netflix_DataModule
 
 class Netflix_Recommender_Engine(pl.LightningModule):
-    def __init__(self): # , hidden_dim=128, learning_rate=1e-3):
+    def __init__(self,hparams): # , hidden_dim=128, learning_rate=1e-3):
         super().__init__()
+        self.hparams = hparams
         self.save_hyperparameters()
 
-        self.movie_embedding = torch.nn.Embeddng(17770,self.hparams.embedding_dim)
-        self.user_embedding = torch.nn.Embeddng(480189,self.hparams.embedding_dim)
+        self.movie_embedding = torch.nn.Embedding(17770,self.hparams.embedding_dim)
+        self.user_embedding = torch.nn.Embedding(480189,self.hparams.embedding_dim)
         self.movie_l1 = torch.nn.Linear(self.hparams.embedding_dim, self.hparams.hidden_dim)
         self.user_l1 = torch.nn.Linear(self.hparams.embedding_dim, self.hparams.hidden_dim)
-        self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 5)
+        self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 1)
 
     def forward(self, x):
         movie_id,user_id = x
@@ -28,24 +33,34 @@ class Netflix_Recommender_Engine(pl.LightningModule):
         movie_l1 = torch.relu(self.movie_l1(movie_vec))
         user_l1 = torch.relu(self.user_l1(user_vec))
 
-        combined = torch.cat([movie_l1,user_l1])
+        combined = torch.cat([movie_l1,user_l1],dim=1)
         rating = self.l2(combined)
-        return rating
+        return rating.squeeze()
 
     def training_step(self, batch, batch_idx):
-        x, y = batch
+        user_id,movie_id,rating = batch
+
+        x=(movie_id,user_id)
+        y=rating
         y_hat = self(x)
         loss = F.mse_loss(y_hat, y)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        x, y = batch
+        movie_id,user_id,rating = batch
+
+        x=(movie_id,user_id)
+        y=rating
         y_hat = self(x)
+        pdb.set_trace()
         loss = F.mse_loss(y_hat, y)
         self.log('valid_loss', loss)
 
     def test_step(self, batch, batch_idx):
-        x, y = batch
+        movie_id,user_id,rating = batch
+
+        x=(movie_id,user_id)
+        y=rating
         y_hat = self(x)
         loss = F.mse_loss(y_hat, y)
         self.log('test_loss', loss)
@@ -70,6 +85,7 @@ def cli_main():
     # ------------
     parser = ArgumentParser()
     parser.add_argument('--batch_size', default=32, type=int)
+    # parser.add_argument('--gpus', default=1, type=int)
     parser = pl.Trainer.add_argparse_args(parser)
     parser = Netflix_Recommender_Engine.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -77,29 +93,26 @@ def cli_main():
     # ------------
     # data
     # ------------
-    dataset = MNIST('', train=True, download=True, transform=transforms.ToTensor())
-    mnist_test = MNIST('', train=False, download=True, transform=transforms.ToTensor())
-    mnist_train, mnist_val = random_split(dataset, [55000, 5000])
-
-    train_loader = DataLoader(mnist_train, batch_size=args.batch_size)
-    val_loader = DataLoader(mnist_val, batch_size=args.batch_size)
-    test_loader = DataLoader(mnist_test, batch_size=args.batch_size)
+    data_dir = Path('./data/')
+    dm = Netflix_DataModule(data_dir)
 
     # ------------
     # model
     # ------------
-    model = Netflix_Recommender_Engine()#(args.hidden_dim, args.learning_rate)
+    model = Netflix_Recommender_Engine(args)#(args.hidden_dim, args.learning_rate)
 
     # ------------
     # training
     # ------------
+    args.gpus=1
     trainer = pl.Trainer.from_argparse_args(args)
-    trainer.fit(model, train_loader, val_loader)
+    trainer.fast_dev_run=True
+    trainer.fit(model, dm)
 
     # ------------
     # testing
     # ------------
-    trainer.test(test_dataloaders=test_loader)
+    # trainer.test(test_dataloaders=test_loader)
 
 
 if __name__ == '__main__':

@@ -27,17 +27,17 @@ class Netflix_DataModule(LightningDataModule):
         movie_id = np.empty(size,dtype=np.int16)
         user_id = np.empty(size,dtype=np.int32)
 
-        rating_file = str(self.blosc_dir/'rating.dat')
-        users_file = str(self.blosc_dir/'user_id.dat')
-        movies_file = str(self.blosc_dir/'movie_id.dat')
+        rating_file = str(self.blosc_dir/'ratings.dat')
+        users_file = str(self.blosc_dir/'users.dat')
+        movies_file = str(self.blosc_dir/'movies.dat')
 
         blosc.decompress_ptr(pa.OSFile(users_file).readall(), user_id.__array_interface__['data'][0])
         blosc.decompress_ptr(pa.OSFile(movies_file).readall(), movie_id.__array_interface__['data'][0])
         blosc.decompress_ptr(pa.OSFile(rating_file).readall(), ratings.__array_interface__['data'][0])
 
-        rating_tensor = torch.tensor(ratings)
-        movie_id_tensor = torch.tensor(movie_id)
-        user_id_tensor = torch.tensor(user_id)
+        rating_tensor = torch.LongTensor(ratings)
+        movie_id_tensor = torch.LongTensor(movie_id)
+        user_id_tensor = torch.LongTensor(user_id)
 
         dataset = TensorDataset(movie_id_tensor,user_id_tensor,rating_tensor)
 
@@ -51,10 +51,10 @@ class Netflix_DataModule(LightningDataModule):
 
 
     def train_dataloader(self):
-        return DataLoader(self.netflix_train, batch_size=32)
+        return DataLoader(self.netflix_train, batch_size=32,num_workers=8,pin_memory=True)
 
     def val_dataloader(self):
-        return DataLoader(self.netflix_val, batch_size=32)
+        return DataLoader(self.netflix_val, batch_size=32,num_workers=8,pin_memory=True)
 
     def test_dataloader(self):
-        return DataLoader(self.netflix_test, batch_size=32)
+        return DataLoader(self.netflix_test, batch_size=32,num_workers=8,pin_memory=True)
