@@ -38,7 +38,7 @@ class Netflix_Recommender_Engine(pl.LightningModule):
         return rating.squeeze()
 
     def training_step(self, batch, batch_idx):
-        user_id,movie_id,rating = batch
+        movie_id,user_id,rating = batch
 
         x=(movie_id,user_id)
         y=rating
@@ -52,7 +52,7 @@ class Netflix_Recommender_Engine(pl.LightningModule):
         x=(movie_id,user_id)
         y=rating
         y_hat = self(x)
-        pdb.set_trace()
+        # pdb.set_trace()
         loss = F.mse_loss(y_hat, y)
         self.log('valid_loss', loss)
 
@@ -84,7 +84,7 @@ def cli_main():
     # args
     # ------------
     parser = ArgumentParser()
-    parser.add_argument('--batch_size', default=32, type=int)
+    parser.add_argument('--batch_size', default=32768, type=int)
     # parser.add_argument('--gpus', default=1, type=int)
     parser = pl.Trainer.add_argparse_args(parser)
     parser = Netflix_Recommender_Engine.add_model_specific_args(parser)
@@ -93,8 +93,8 @@ def cli_main():
     # ------------
     # data
     # ------------
-    data_dir = Path('./data/')
-    dm = Netflix_DataModule(data_dir)
+    args.data_dir = Path('./data/')
+    dm = Netflix_DataModule(args)
 
     # ------------
     # model
@@ -104,8 +104,11 @@ def cli_main():
     # ------------
     # training
     # ------------
-    args.gpus=1
+    args.gpus=4
+    args.distributed_backend='ddp'
+    # args.auto_scale_batch_size='binsearch'
     trainer = pl.Trainer.from_argparse_args(args)
+    # trainer.distributed_backend='ddp'
     trainer.fast_dev_run=True
     trainer.fit(model, dm)
 

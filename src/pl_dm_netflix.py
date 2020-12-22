@@ -15,10 +15,10 @@ import blosc
 
 class Netflix_DataModule(LightningDataModule):
 
-    def __init__(self, data_dir: str):
+    def __init__(self, args):
         super().__init__()
         # self.batch_size = batch_size
-        self.blosc_dir = Path(data_dir)
+        self.args = args
     
     def setup(self, stage = None):
 
@@ -27,15 +27,15 @@ class Netflix_DataModule(LightningDataModule):
         movie_id = np.empty(size,dtype=np.int16)
         user_id = np.empty(size,dtype=np.int32)
 
-        rating_file = str(self.blosc_dir/'ratings.dat')
-        users_file = str(self.blosc_dir/'users.dat')
-        movies_file = str(self.blosc_dir/'movies.dat')
+        rating_file = str(self.args.data_dir/'ratings.dat')
+        users_file = str(self.args.data_dir/'users.dat')
+        movies_file = str(self.args.data_dir/'movies.dat')
 
         blosc.decompress_ptr(pa.OSFile(users_file).readall(), user_id.__array_interface__['data'][0])
         blosc.decompress_ptr(pa.OSFile(movies_file).readall(), movie_id.__array_interface__['data'][0])
         blosc.decompress_ptr(pa.OSFile(rating_file).readall(), ratings.__array_interface__['data'][0])
 
-        rating_tensor = torch.LongTensor(ratings)
+        rating_tensor = torch.FloatTensor(ratings)
         movie_id_tensor = torch.LongTensor(movie_id)
         user_id_tensor = torch.LongTensor(user_id)
 
@@ -51,10 +51,10 @@ class Netflix_DataModule(LightningDataModule):
 
 
     def train_dataloader(self):
-        return DataLoader(self.netflix_train, batch_size=32,num_workers=8,pin_memory=True)
+        return DataLoader(self.netflix_train, batch_size=self.args.batch_size,num_workers=8,pin_memory=True)
 
     def val_dataloader(self):
-        return DataLoader(self.netflix_val, batch_size=32,num_workers=8,pin_memory=True)
+        return DataLoader(self.netflix_val, batch_size=self.args.batch_size,num_workers=8,pin_memory=True)
 
     def test_dataloader(self):
-        return DataLoader(self.netflix_test, batch_size=32,num_workers=8,pin_memory=True)
+        return DataLoader(self.netflix_test, batch_size=self.args.batch_size,num_workers=8,pin_memory=True)
