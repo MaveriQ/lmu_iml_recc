@@ -32,6 +32,8 @@ class Netflix_Recommender_Engine(pl.LightningModule):
         #     print('Regression loss')
         #     self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 1)
         #     self.loss = torch.nn.MSELoss()
+        self.train_accuracy = pl.metrics.Accuracy()
+        self.valid_accuracy = pl.metrics.Accuracy()
 
     def forward(self, x):
         movie_id,user_id = x
@@ -47,20 +49,29 @@ class Netflix_Recommender_Engine(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
 
-        loss = self._step(batch)
-
+        loss, y_pred, y = self._step(batch)
+        self.log('train_acc_step', self.train_accuracy(y_pred, y))
+        self.log('trg_loss', loss)
         return loss
+
+    def training_epoch_end(self, outs):
+        # log epoch metric
+        self.log('train_acc_epoch', self.train_accuracy.compute())
 
     def validation_step(self, batch, batch_idx):
 
-        loss = self._step(batch)
-
+        loss, y_pred, y = self._step(batch)
+        self.log('valid_acc_step', self.valid_accuracy(y_pred, y))
         self.log('valid_loss', loss)
+
+    def validation_epoch_end(self, outs):
+        # log epoch metric
+        self.log('valid_acc_epoch', self.valid_accuracy.compute())
 
     def test_step(self, batch, batch_idx):
 
-        loss = self._step(batch)
-
+        loss, y_pred, y = self._step(batch)
+        self.log('test_acc_step', self.accuracy(y_pred, y))
         self.log('test_loss', loss)
 
     def _step(self,batch):
@@ -74,9 +85,9 @@ class Netflix_Recommender_Engine(pl.LightningModule):
         # else:
             # y=rating
 
-        y_hat = self(x)
-        loss = self.loss(y_hat, y)
-        return loss
+        y_pred = self(x)
+        loss = self.loss(y_pred, y)
+        return loss, y_pred, y
 
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
