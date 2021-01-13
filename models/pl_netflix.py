@@ -23,7 +23,15 @@ class Netflix_Recommender_Engine(pl.LightningModule):
         self.user_embedding = torch.nn.Embedding(480189,self.hparams.embedding_dim)
         self.movie_l1 = torch.nn.Linear(self.hparams.embedding_dim, self.hparams.hidden_dim)
         self.user_l1 = torch.nn.Linear(self.hparams.embedding_dim, self.hparams.hidden_dim)
-        self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 1)
+
+        # if self.hparams.is_classifer:
+            # print('Classification loss')
+        self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 6)
+        self.loss = torch.nn.CrossEntropyLoss()
+        # else:
+        #     print('Regression loss')
+        #     self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 1)
+        #     self.loss = torch.nn.MSELoss()
 
     def forward(self, x):
         movie_id,user_id = x
@@ -38,42 +46,52 @@ class Netflix_Recommender_Engine(pl.LightningModule):
         return rating.squeeze()
 
     def training_step(self, batch, batch_idx):
-        movie_id,user_id,rating = batch
 
-        x=(movie_id,user_id)
-        y=rating
-        y_hat = self(x)
-        loss = F.mse_loss(y_hat, y)
+        loss = self._step(batch)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
-        movie_id,user_id,rating = batch
 
-        x=(movie_id,user_id)
-        y=rating
-        y_hat = self(x)
-        # pdb.set_trace()
-        loss = F.mse_loss(y_hat, y)
+        loss = self._step(batch)
+
         self.log('valid_loss', loss)
 
     def test_step(self, batch, batch_idx):
+
+        loss = self._step(batch)
+
+        self.log('test_loss', loss)
+
+    def _step(self,batch):
+
         movie_id,user_id,rating = batch
 
         x=(movie_id,user_id)
-        y=rating
+        
+        # if self.hparams.is_classifer:
+        y=rating.long()
+        # else:
+            # y=rating
+
         y_hat = self(x)
-        loss = F.mse_loss(y_hat, y)
-        self.log('test_loss', loss)
+        loss = self.loss(y_hat, y)
+        return loss
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+        optim = torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(optim,
+                                                            patience=2,
+                                                            verbose=True)
+        return {'optimizer':optim,
+                'scheduler':sched}
 
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = ArgumentParser(parents=[parent_parser], add_help=False)
         parser.add_argument('--embedding_dim', type=int, default=128)
         parser.add_argument('--hidden_dim', type=int, default=256)
-        parser.add_argument('--learning_rate', type=float, default=0.0001)
+        parser.add_argument('--learning_rate', type=float, default=0.001)
         return parser
 
 
@@ -84,8 +102,10 @@ def cli_main():
     # args
     # ------------
     parser = ArgumentParser()
-    parser.add_argument('--batch_size', default=32768, type=int)
-    # parser.add_argument('--gpus', default=1, type=int)
+    parser.add_argument('--batch_size', default=32, type=int)
+    # parser.add_argument('--is_classifer',action='store_true')
+    # parser.add_argument('--fast_dev_run',action='store_true')
+
     parser = pl.Trainer.add_argparse_args(parser)
     parser = Netflix_Recommender_Engine.add_model_specific_args(parser)
     args = parser.parse_args()
@@ -104,12 +124,7 @@ def cli_main():
     # ------------
     # training
     # ------------
-    args.gpus=4
-    args.distributed_backend='ddp'
-    # args.auto_scale_batch_size='binsearch'
     trainer = pl.Trainer.from_argparse_args(args)
-    # trainer.distributed_backend='ddp'
-    trainer.fast_dev_run=True
     trainer.fit(model, dm)
 
     # ------------
