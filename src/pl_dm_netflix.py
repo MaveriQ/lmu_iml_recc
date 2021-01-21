@@ -39,6 +39,8 @@ class Netflix_DataModule(LightningDataModule):
         movie_id_tensor = torch.LongTensor(movie_id)
         user_id_tensor = torch.LongTensor(user_id)
 
+        rating_tensor = rating_tensor - 1
+
         dataset = TensorDataset(movie_id_tensor,user_id_tensor,rating_tensor)
 
         training_size = int(0.9*size)
