@@ -20,25 +20,18 @@ class Netflix_Recommender_Engine_Conv1D(pl.LightningModule):
         self.hparams = hparams
         self.save_hyperparameters()
 
-        self.movie_embedding = torch.nn.Embedding(1000,self.hparams.embedding_dim) # 17770
-        self.user_embedding = torch.nn.Embedding(10000,self.hparams.embedding_dim) # 480189
+        self.movie_embedding = torch.nn.Embedding(17770,self.hparams.embedding_dim) # 1000
+        self.user_embedding = torch.nn.Embedding(480189,self.hparams.embedding_dim) # 10000
 
         self.movie_l1 = torch.nn.Conv1d(in_channels=1, out_channels=self.hparams.hidden_dim, kernel_size=self.hparams.kernel_size,padding=self.hparams.kernel_size//2)
         self.user_l1 = torch.nn.Conv1d(in_channels=1, out_channels=self.hparams.hidden_dim, kernel_size=self.hparams.kernel_size,padding=self.hparams.kernel_size//2)
 
-        # self.movie_l1 = torch.nn.Linear(self.hparams.embedding_dim, self.hparams.hidden_dim)
-        # self.user_l1 = torch.nn.Linear(self.hparams.embedding_dim, self.hparams.hidden_dim)
+        self.l2 = torch.nn.Linear(self.hparams.hidden_dim**2, self.hparams.hidden_dim)
+        self.l3 = torch.nn.Linear(self.hparams.hidden_dim, 1)
+        self.loss = torch.nn.MSELoss()
 
-        # if self.hparams.is_classifer:
-            # print('Classification loss')
-        self.l2 = torch.nn.Linear(self.hparams.hidden_dim**2, 5)
-        self.loss = torch.nn.CrossEntropyLoss()
-        # else:
-        #     print('Regression loss')
-        #     self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 1)
-        #     self.loss = torch.nn.MSELoss()
-        self.train_accuracy = pl.metrics.Accuracy()
-        self.valid_accuracy = pl.metrics.Accuracy()
+        self.train_mse = pl.metrics.MeanSquaredError()
+        self.valid_mse = pl.metrics.MeanSquaredError()
 
     def forward(self, x):
         movie_id,user_id = x
@@ -48,30 +41,32 @@ class Netflix_Recommender_Engine_Conv1D(pl.LightningModule):
         movie_l1 = torch.relu(self.movie_l1(movie_vec.unsqueeze(1)))
         user_l1 = torch.relu(self.user_l1(user_vec.unsqueeze(1)))
 
-        combined = torch.cat([movie_l1,user_l1],dim=2)
-        rating = self.l2(combined.reshape(self.hparams.batch_size,-1))
-        return rating
+        # combined = torch.cat([movie_l1,user_l1],dim=2)
+        combined = torch.bmm(movie_l1,user_l1.transpose(1,2))
+        l2 = torch.relu(self.l2(combined.reshape(self.hparams.batch_size,-1)))
+        rating = self.l3(l2)
+        return rating.squeeze()
 
     def training_step(self, batch, batch_idx):
 
         loss, y_pred, y = self._step(batch)
-        self.log('train_acc_step', self.train_accuracy(y_pred, y))
+        self.log('train_acc_step', self.train_mse(y_pred, y))
         self.log('trg_loss', loss)
         return loss
 
     def training_epoch_end(self, outs):
         # log epoch metric
-        self.log('train_acc_epoch', self.train_accuracy.compute())
+        self.log('train_acc_epoch', self.train_mse.compute())
 
     def validation_step(self, batch, batch_idx):
 
         loss, y_pred, y = self._step(batch)
-        self.log('valid_acc_step', self.valid_accuracy(y_pred, y))
+        self.log('valid_acc_step', self.valid_mse(y_pred, y))
         self.log('valid_loss', loss)
 
     def validation_epoch_end(self, outs):
         # log epoch metric
-        self.log('valid_acc_epoch', self.valid_accuracy.compute())
+        self.log('valid_acc_epoch', self.valid_mse.compute())
 
     def test_step(self, batch, batch_idx):
 
@@ -86,7 +81,7 @@ class Netflix_Recommender_Engine_Conv1D(pl.LightningModule):
         x=(movie_id,user_id)
         
         # if self.hparams.is_classifer:
-        y=rating.long()
+        y=rating.float()
         # else:
             # y=rating
 
@@ -97,6 +92,7 @@ class Netflix_Recommender_Engine_Conv1D(pl.LightningModule):
     def configure_optimizers(self):
         optim = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
         sched = torch.optim.lr_scheduler.ReduceLROnPlateau(optim,
+                                                            mode='max',
                                                             patience=2,
                                                             verbose=True)
         return {'optimizer':optim,
@@ -125,47 +121,48 @@ class Netflix_Recommender_Engine_Linear(pl.LightningModule):
 
         # if self.hparams.is_classifer:
             # print('Classification loss')
-        self.l2 = torch.nn.Linear(self.hparams.hidden_dim**2, 5)
-        self.loss = torch.nn.CrossEntropyLoss()
+            # self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 5)
+            # self.loss = torch.nn.CrossEntropyLoss()
         # else:
         #     print('Regression loss')
-        #     self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, 1)
-        #     self.loss = torch.nn.MSELoss()
-        self.train_accuracy = pl.metrics.Accuracy()
-        self.valid_accuracy = pl.metrics.Accuracy()
+        self.l2 = torch.nn.Linear(self.hparams.hidden_dim*2, self.hparams.hidden_dim)
+        self.l3 = torch.nn.Linear(self.hparams.hidden_dim, 1)
+        self.loss = torch.nn.MSELoss()
+        self.train_mse = pl.metrics.MeanSquaredError()
+        self.valid_mse = pl.metrics.MeanSquaredError()
 
     def forward(self, x):
         movie_id,user_id = x
         movie_vec = self.movie_embedding(movie_id)
         user_vec = self.user_embedding(user_id)
 
-        movie_l1 = torch.relu(self.movie_l1(movie_vec.unsqueeze(1)))
-        user_l1 = torch.relu(self.user_l1(user_vec.unsqueeze(1)))
+        movie_l1 = torch.relu(self.movie_l1(movie_vec))
+        user_l1 = torch.relu(self.user_l1(user_vec))
 
-        combined = torch.cat([movie_l1,user_l1],dim=2)
-        rating = self.l2(combined.reshape(self.hparams.batch_size,-1))
-        return rating
+        combined = torch.cat([movie_l1,user_l1],dim=1)
+        l2 = torch.relu(self.l2(combined))
+        rating = self.l3(l2)
+        return rating.squeeze()
 
     def training_step(self, batch, batch_idx):
 
         loss, y_pred, y = self._step(batch)
-        self.log('train_acc_step', self.train_accuracy(y_pred, y))
         self.log('trg_loss', loss)
         return loss
 
     def training_epoch_end(self, outs):
         # log epoch metric
-        self.log('train_acc_epoch', self.train_accuracy.compute())
+        self.log('train_acc_epoch', self.train_mse.compute())
 
     def validation_step(self, batch, batch_idx):
 
         loss, y_pred, y = self._step(batch)
-        self.log('valid_acc_step', self.valid_accuracy(y_pred, y))
+        self.log('valid_acc_step', self.valid_mse(y_pred, y))
         # self.log('valid_loss', loss)
 
     def validation_epoch_end(self, outs):
         # log epoch metric
-        self.log('valid_acc_epoch', self.valid_accuracy.compute())
+        self.log('valid_acc_epoch', self.valid_mse.compute())
 
     def test_step(self, batch, batch_idx):
 
@@ -180,7 +177,7 @@ class Netflix_Recommender_Engine_Linear(pl.LightningModule):
         x=(movie_id,user_id)
         
         # if self.hparams.is_classifer:
-        y=rating.long()
+        y=rating.float()
         # else:
             # y=rating
 
@@ -222,14 +219,14 @@ def cli_main():
     parser = pl.Trainer.add_argparse_args(parser)
     parser = Netflix_Recommender_Engine_Linear.add_model_specific_args(parser)
 
-    # debug_args = "--fast_dev_run --gpus 1 --accelerator ddp".split()
-    debug_args = "--gpus 1 --accelerator ddp --batch_size 4096 --max_epochs 10 --lr 1e-2 --exp_name conv_lr_1e2_bs_4096_test --val_check_interval 0.01 --limit_val_batches 0.01".split()
-    args = parser.parse_args()
+    debug_args = "--fast_dev_run 1 --gpus 1 --accelerator ddp --embedding_dim 32".split()
+    # debug_args = "--gpus 1 --accelerator ddp --batch_size 4096 --max_epochs 10 --lr 1e-2 --exp_name conv_lr_1e2_bs_4096_test --val_check_interval 0.01 --limit_val_batches 0.01".split()
+    args = parser.parse_args(debug_args)
 
     # ------------
     # data
     # ------------
-    args.data_dir = Path('../data/')
+    args.data_dir = Path('./data/')
     dm = Netflix_DataModule(args)
 
     # ------------
